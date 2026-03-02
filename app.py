@@ -5,14 +5,16 @@ from werkzeug.utils import secure_filename
 # ----------------------------
 # Configuration
 # ----------------------------
-UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'txt', 'png', 'jpg', 'jpeg', 'pdf'}
 
-app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.secret_key = "supersecretkey"
+# Use /tmp for Render (ephemeral storage)
+UPLOAD_FOLDER = "/uploads"
 
-# Ensure upload folder exists
+app = Flask(__name__)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB limit
+app.secret_key = os.environ.get("SECRET_KEY", "fallback-secret-key")
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
@@ -20,8 +22,8 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Helper Function
 # ----------------------------
 def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return "." in filename and \
+           filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 # ----------------------------
@@ -34,10 +36,8 @@ def index():
     preview_type = None
 
     if request.method == "POST":
-
         action = request.form.get("action")
 
-        # Clear action
         if action == "clear":
             return redirect(url_for("index"))
 
@@ -47,54 +47,51 @@ def index():
             flash("No file selected.")
             return redirect(request.url)
 
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-
-            file_info = {
-                "filename": filename,
-                "size_kb": round(os.path.getsize(filepath) / 1024, 2),
-                "type": filename.split('.')[-1]
-            }
-
-            # Submit action
-            if action == "submit":
-                flash("File submitted successfully.")
-
-            # Read action (only text)
-            if action == "read" and filename.endswith(".txt"):
-                with open(filepath, "r", encoding="utf-8") as f:
-                    file_content = f.read()
-
-            # View action
-            if action == "view":
-                if filename.lower().endswith((".png", ".jpg", ".jpeg")):
-                    preview_type = "image"
-                elif filename.lower().endswith(".pdf"):
-                    preview_type = "pdf"
-
-            return render_template(
-                "index.html",
-                file_info=file_info,
-                file_content=file_content,
-                preview_type=preview_type
-            )
-
-        else:
+        if not allowed_file(file.filename):
             flash("File type not allowed.")
             return redirect(request.url)
+
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        file.save(filepath)
+
+        file_info = {
+            "filename": filename,
+            "size_kb": round(os.path.getsize(filepath) / 1024, 2),
+            "type": filename.split(".")[-1]
+        }
+
+        if action == "submit":
+            flash("File submitted successfully.")
+
+        if action == "read" and filename.endswith(".txt"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                file_content = f.read()
+
+        if action == "view":
+            if filename.lower().endswith(("png", "jpg", "jpeg")):
+                preview_type = "image"
+            elif filename.lower().endswith("pdf"):
+                preview_type = "pdf"
+
+        return render_template(
+            "index.html",
+            file_info=file_info,
+            file_content=file_content,
+            preview_type=preview_type
+        )
 
     return render_template("index.html")
 
 
-@app.route('/uploads/<filename>')
+@app.route("/uploads/<filename>")
 def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 
 # ----------------------------
-# Run App
+# Production Entry
 # ----------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
